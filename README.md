@@ -2,7 +2,7 @@
 
 [pixi-build](https://pixi.sh/latest/build/getting_started/) backends for languages pixi doesn't cover yet:
 
-- **`pixi-build-nim`**: builds Nim packages from their `.nimble` file.
+- **`pixi-build-nim`**: builds Nim packages from their `.nimble` file. There are two implementations: the Rust crate and `nim-native/`, the same backend written in Nim.
 - **`pixi-build-flutter`**: builds Flutter apps and Dart packages from `pubspec.yaml`.
 
 Documentation: https://codegod100.github.io/pixi-backends/
@@ -19,7 +19,8 @@ cd samples/nim/hello_nim && pixi run hello_nim
 
 | Path | What it is |
 |---|---|
-| `crates/pixi_build_nim` | The Nim backend |
+| `crates/pixi_build_nim` | The Nim backend (Rust) |
+| `nim-native/` | The Nim backend written in Nim, speaking pixi's backend protocol directly |
 | `crates/pixi_build_flutter` | The Flutter and Dart backend |
 | `samples/` | Example projects for both backends |
 | `docs/` | The MkDocs site (`pip install -r requirements-docs.txt && mkdocs serve`) |

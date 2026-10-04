@@ -39,5 +39,6 @@ nav:
   - Getting started: getting-started.md
   - Backends:
       - Nim: backends/nim.md
+      - Nim (native): backends/nim-native.md
       - Flutter and Dart: backends/flutter.md
   - Samples: samples.md

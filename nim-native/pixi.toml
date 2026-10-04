@@ -1,0 +1,36 @@
+# pixi-build-nim, written in Nim.
+#
+# This manifest is both a dev workspace (`pixi run test`, `pixi run build`)
+# and the package definition for the backend itself. The package is built by
+# pixi-build-nim, so the backend builds itself: bootstrap with
+#   pixi run build
+#   PIXI_BUILD_BACKEND_OVERRIDE=pixi-build-nim=$PWD/bin/pixi-build-nim pixi build
+
+[workspace]
+name = "pixi-build-nim-native"
+channels = ["https://conda.anaconda.org/conda-forge"]
+platforms = ["linux-64", "linux-aarch64", "osx-64"]
+preview = ["pixi-build"]
+
+[dependencies]
+nim = ">=2.2"
+
+[tasks]
+build = "nim c -d:release --hints:off --out:bin/pixi-build-nim src/pixi_build_nim.nim"
+test = "nim c -r --hints:off --out:bin/test_all tests/test_all.nim"
+e2e = { cmd = "bash tests/e2e.sh", depends-on = ["build"] }
+
+[package]
+name = "pixi-build-nim"
+version = "0.2.0"
+description = "A pixi build backend for Nim packages, written in Nim"
+license = "BSD-3-Clause"
+
+[package.build.backend]
+name = "pixi-build-nim"
+version = "*"
+
+[package.run-dependencies]
+pixi-build-api-version = ">=7,<8"
+# libzstd, loaded at runtime to compress the .conda packages the backend writes.
+zstd = "*"
