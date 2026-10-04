@@ -1,0 +1,53 @@
+---
+source: crates/pixi_build_flutter/src/build_script.rs
+expression: script
+---
+set -euxo pipefail
+rm -rf "$SRC_DIR/app"
+mkdir -p "$SRC_DIR/app"
+(cd "/src/my_app" && tar --exclude=./build --exclude=./.dart_tool --exclude=./.pixi -cf - .) | (cd "$SRC_DIR/app" && tar -xf -)
+cd "$SRC_DIR/app"
+export PUB_CACHE="${PUB_CACHE:-$SRC_DIR/.pub-cache}"
+
+if [ "$(cat "/cache/flutter-sdk/3.47.6/.pixi-sdk-sha256" 2>/dev/null || true)" != "abc123" ]; then
+  sdk_tmp="/cache/flutter-sdk/3.47.6.download.$$"
+  rm -rf "$sdk_tmp"
+  mkdir -p "$sdk_tmp"
+  curl -fsSL --retry 3 -o "$sdk_tmp/flutter.zip" "https://example.com/flutter.zip"
+  actual=$(cmake -E sha256sum "$sdk_tmp/flutter.zip" | cut -d' ' -f1)
+  if [ "$actual" != "abc123" ]; then
+    echo "checksum mismatch for https://example.com/flutter.zip: $actual" >&2
+    exit 1
+  fi
+  (cd "$sdk_tmp" && cmake -E tar xf "flutter.zip")
+  rm -rf "/cache/flutter-sdk/3.47.6"
+  mv "$sdk_tmp/flutter" "/cache/flutter-sdk/3.47.6"
+  echo "abc123" > "/cache/flutter-sdk/3.47.6/.pixi-sdk-sha256"
+  rm -rf "$sdk_tmp"
+fi
+export FLUTTER_ROOT="/cache/flutter-sdk/3.47.6"
+export PATH="$FLUTTER_ROOT/bin:$PATH"
+export FLUTTER_SUPPRESS_ANALYTICS=true
+export CI=true
+# The SDK is a git checkout that the flutter tool inspects; trust it without
+# touching the user's git config.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
+
+"/cache/flutter-sdk/3.47.6/bin/flutter" --suppress-analytics --version
+if [ ! -d "macos" ]; then
+  "/cache/flutter-sdk/3.47.6/bin/flutter" --suppress-analytics create --platforms=macos --project-name my_app .
+fi
+"/cache/flutter-sdk/3.47.6/bin/flutter" --suppress-analytics pub get
+"/cache/flutter-sdk/3.47.6/bin/flutter" --suppress-analytics build macos --release --dart-define=FOO=bar
+
+mkdir -p "$PREFIX/lib/my_app" "$PREFIX/bin"
+for app in build/macos/Build/Products/Release/*.app; do
+  cp -R "$app" "$PREFIX/lib/my_app/"
+  app_name=$(basename "$app" .app)
+  exe=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
+  cat > "$PREFIX/bin/my_app" <<EOF
+#!/bin/sh
+exec "\$(cd "\$(dirname "\$0")/.." && pwd)/lib/my_app/$app_name.app/Contents/MacOS/$exe" "\$@"
+EOF
+  chmod +x "$PREFIX/bin/my_app"
+done

@@ -1,0 +1,29 @@
+---
+source: crates/pixi_build_nim/src/build_script.rs
+expression: script
+---
+nim --version
+nimble --version
+
+export NIMBLE_DIR="$SRC_DIR/nimble"
+mkdir -p "$NIMBLE_DIR"
+
+# Fetch nimble dependencies into a private nimble dir.
+pushd "/pkg"
+nimble install --depsOnly -y --useSystemNim --nimbleDir:"$NIMBLE_DIR"
+popd
+
+mkdir -p "$PREFIX/bin"
+
+nim c \
+    -d:release \
+    --hints:off \
+    --nimblePath:"$NIMBLE_DIR/pkgs2" \
+    --nimblePath:"$NIMBLE_DIR/pkgs" \
+    --nimblePath:"$PREFIX/share/nimble/pkgs2" \
+    --nimcache:"$SRC_DIR/nimcache/hello" \
+    -d:NimblePkgVersion=0.1.0 \
+    --passL:"$LDFLAGS" \
+    --out:"$PREFIX/bin/hello" \
+    --opt:size \
+    "/pkg/src/hello.nim"

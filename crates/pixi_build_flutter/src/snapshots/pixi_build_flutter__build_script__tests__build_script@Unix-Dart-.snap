@@ -1,0 +1,16 @@
+---
+source: crates/pixi_build_flutter/src/build_script.rs
+expression: script
+---
+set -euxo pipefail
+rm -rf "$SRC_DIR/app"
+mkdir -p "$SRC_DIR/app"
+(cd "/src/my_app" && tar --exclude=./build --exclude=./.dart_tool --exclude=./.pixi -cf - .) | (cd "$SRC_DIR/app" && tar -xf -)
+cd "$SRC_DIR/app"
+export PUB_CACHE="${PUB_CACHE:-$SRC_DIR/.pub-cache}"
+
+dart --version
+dart pub get
+
+mkdir -p "$PREFIX/bin"
+dart compile exe "bin/main.dart" -o "$PREFIX/bin/hello" --dart-define=FOO=bar

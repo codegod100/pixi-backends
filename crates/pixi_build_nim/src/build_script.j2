@@ -1,0 +1,45 @@
+{#- Nim build script. conda-forge only ships nim for unix platforms, so this is bash only. -#}
+{%- set nimble_dir = "$SRC_DIR/nimble" -%}
+nim --version
+nimble --version
+
+export NIMBLE_DIR="{{ nimble_dir }}"
+mkdir -p "$NIMBLE_DIR"
+{%- if is_library %}
+
+# No `bin` entries: install the package sources (and its nimble dependencies)
+# into a nimble directory inside the prefix.
+pushd "{{ source_dir }}"
+nimble install -y --useSystemNim --nimbleDir:"$PREFIX/share/nimble"
+popd
+# Drop nimble's global bookkeeping so several Nim library packages can be
+# installed into the same environment without file clashes.
+rm -f "$PREFIX/share/nimble/"*.json
+{%- else %}
+{%- if has_nimble_deps %}
+
+# Fetch nimble dependencies into a private nimble dir.
+pushd "{{ source_dir }}"
+nimble install --depsOnly -y --useSystemNim --nimbleDir:"$NIMBLE_DIR"
+popd
+{%- endif %}
+
+mkdir -p "$PREFIX/bin"
+{%- for bin in bins %}
+
+nim {{ backend }} \
+    -d:release \
+    --hints:off \
+    --nimblePath:"$NIMBLE_DIR/pkgs2" \
+    --nimblePath:"$NIMBLE_DIR/pkgs" \
+    --nimblePath:"$PREFIX/share/nimble/pkgs2" \
+    --nimcache:"$SRC_DIR/nimcache/{{ bin.name }}" \
+{%- if version %}
+    -d:NimblePkgVersion={{ version }} \
+{%- endif %}
+    --passL:"$LDFLAGS" \
+    --out:"$PREFIX/bin/{{ bin.name }}"{% for arg in extra_args %} \
+    {{ arg }}{% endfor %} \
+    "{{ src_dir }}/{{ bin.module }}.nim"
+{%- endfor %}
+{%- endif %}

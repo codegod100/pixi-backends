@@ -1,0 +1,18 @@
+---
+source: crates/pixi_build_nim/src/build_script.rs
+expression: script
+---
+nim --version
+nimble --version
+
+export NIMBLE_DIR="$SRC_DIR/nimble"
+mkdir -p "$NIMBLE_DIR"
+
+# No `bin` entries: install the package sources (and its nimble dependencies)
+# into a nimble directory inside the prefix.
+pushd "/pkg"
+nimble install -y --useSystemNim --nimbleDir:"$PREFIX/share/nimble"
+popd
+# Drop nimble's global bookkeeping so several Nim library packages can be
+# installed into the same environment without file clashes.
+rm -f "$PREFIX/share/nimble/"*.json

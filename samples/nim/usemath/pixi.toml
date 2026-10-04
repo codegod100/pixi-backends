@@ -1,0 +1,14 @@
+[workspace]
+channels = ["https://conda.anaconda.org/conda-forge"]
+platforms = ["linux-64"]
+preview = ["pixi-build"]
+
+[dependencies]
+usemath = { path = "." }
+
+[package.build.backend]
+name = "pixi-build-nim"
+version = "*"
+
+[package.host-dependencies]
+mathlib = { path = "../mathlib" }

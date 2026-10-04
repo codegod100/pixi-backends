@@ -1,0 +1,58 @@
+---
+source: crates/pixi_build_flutter/src/build_script.rs
+expression: script
+---
+@echo on
+if exist "%SRC_DIR%\app" rmdir /s /q "%SRC_DIR%\app"
+robocopy "C:\src\my_app" "%SRC_DIR%\app" /E /XD "C:\src\my_app\build" "C:\src\my_app\.dart_tool" "C:\src\my_app\.pixi" /NFL /NDL /NJH /NJS
+if errorlevel 8 exit 1
+cd /d "%SRC_DIR%\app"
+if not defined PUB_CACHE set "PUB_CACHE=%SRC_DIR%\.pub-cache"
+
+set "SDK_SHA="
+if exist "C:\cache\flutter-sdk\3.47.6\.pixi-sdk-sha256" set /p SDK_SHA=<"C:\cache\flutter-sdk\3.47.6\.pixi-sdk-sha256"
+if "%SDK_SHA%"=="abc123" goto :sdk_ready
+set "SDK_TMP=C:\cache\flutter-sdk\3.47.6.download"
+if exist "%SDK_TMP%" rmdir /s /q "%SDK_TMP%"
+mkdir "%SDK_TMP%"
+curl -fsSL --retry 3 -o "%SDK_TMP%\flutter.zip" "https://example.com/flutter.zip"
+if errorlevel 1 exit 1
+set "SDK_ACTUAL="
+for /f "tokens=1" %%h in ('cmake -E sha256sum "%SDK_TMP%\flutter.zip"') do set "SDK_ACTUAL=%%h"
+if /i not "%SDK_ACTUAL%"=="abc123" (
+  echo checksum mismatch for https://example.com/flutter.zip: %SDK_ACTUAL%
+  exit 1
+)
+pushd "%SDK_TMP%"
+cmake -E tar xf "flutter.zip"
+if errorlevel 1 exit 1
+popd
+if exist "C:\cache\flutter-sdk\3.47.6" rmdir /s /q "C:\cache\flutter-sdk\3.47.6"
+move "%SDK_TMP%\flutter" "C:\cache\flutter-sdk\3.47.6"
+if errorlevel 1 exit 1
+>"C:\cache\flutter-sdk\3.47.6\.pixi-sdk-sha256" echo abc123
+rmdir /s /q "%SDK_TMP%"
+:sdk_ready
+set "FLUTTER_ROOT=C:\cache\flutter-sdk\3.47.6"
+set "PATH=C:\cache\flutter-sdk\3.47.6\bin;%PATH%"
+set "FLUTTER_SUPPRESS_ANALYTICS=true"
+set "CI=true"
+
+"C:\cache\flutter-sdk\3.47.6\bin\flutter.bat" --suppress-analytics --version
+if errorlevel 1 exit 1
+if not exist "windows\" "C:\cache\flutter-sdk\3.47.6\bin\flutter.bat" --suppress-analytics create --platforms=windows --project-name my_app .
+if errorlevel 1 exit 1
+"C:\cache\flutter-sdk\3.47.6\bin\flutter.bat" --suppress-analytics pub get
+if errorlevel 1 exit 1
+"C:\cache\flutter-sdk\3.47.6\bin\flutter.bat" --suppress-analytics build windows --release --dart-define=FOO=bar
+if errorlevel 1 exit 1
+
+set "BUNDLE="
+for /d %%d in (build\windows\*) do if exist "%%d\runner\Release" set "BUNDLE=%%d\runner\Release"
+if not defined BUNDLE exit 1
+xcopy /E /I /Y "%BUNDLE%" "%LIBRARY_PREFIX%\lib\my_app"
+if errorlevel 1 exit 1
+if not exist "%LIBRARY_BIN%" mkdir "%LIBRARY_BIN%"
+for %%f in ("%BUNDLE%\*.exe") do (
+  echo @"%%~dp0..\lib\my_app\%%~nxf" %%*> "%LIBRARY_BIN%\%%~nf.bat"
+)

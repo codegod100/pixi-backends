@@ -1,0 +1,175 @@
+{%- set is_cmd_exe = build_platform == "windows" -%}
+{%- if is_cmd_exe -%}
+{%- set flutter = "\"" ~ flutter_sdk ~ "\\bin\\flutter.bat\"" -%}
+{%- else -%}
+{%- set flutter = "\"" ~ flutter_sdk ~ "/bin/flutter\"" -%}
+{%- endif -%}
+{%- macro check() -%}
+{%- if is_cmd_exe %}
+if errorlevel 1 exit 1
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Build in a copy of the project, so that `flutter create`, pub and the
+    build outputs never touch the user's checkout. -#}
+{% if is_cmd_exe -%}
+@echo on
+if exist "%SRC_DIR%\app" rmdir /s /q "%SRC_DIR%\app"
+robocopy "{{ source_dir }}" "%SRC_DIR%\app" /E /XD "{{ source_dir }}\build" "{{ source_dir }}\.dart_tool" "{{ source_dir }}\.pixi" /NFL /NDL /NJH /NJS
+if errorlevel 8 exit 1
+cd /d "%SRC_DIR%\app"
+if not defined PUB_CACHE set "PUB_CACHE=%SRC_DIR%\.pub-cache"
+{%- else -%}
+set -euxo pipefail
+rm -rf "$SRC_DIR/app"
+mkdir -p "$SRC_DIR/app"
+(cd "{{ source_dir }}" && tar --exclude=./build --exclude=./.dart_tool --exclude=./.pixi -cf - .) | (cd "$SRC_DIR/app" && tar -xf -)
+cd "$SRC_DIR/app"
+export PUB_CACHE="${PUB_CACHE:-$SRC_DIR/.pub-cache}"
+{%- endif %}
+{% if mode == "flutter" %}
+{%- if sdk %}
+{#- Download the SDK once and keep it; the marker records which archive it
+    came from. -#}
+{%- if is_cmd_exe %}
+set "SDK_SHA="
+if exist "{{ flutter_sdk }}\.pixi-sdk-sha256" set /p SDK_SHA=<"{{ flutter_sdk }}\.pixi-sdk-sha256"
+if "%SDK_SHA%"=="{{ sdk.sha256 }}" goto :sdk_ready
+set "SDK_TMP={{ flutter_sdk }}.download"
+if exist "%SDK_TMP%" rmdir /s /q "%SDK_TMP%"
+mkdir "%SDK_TMP%"
+curl -fsSL --retry 3 -o "%SDK_TMP%\{{ sdk.file_name }}" "{{ sdk.url }}"
+if errorlevel 1 exit 1
+set "SDK_ACTUAL="
+for /f "tokens=1" %%h in ('cmake -E sha256sum "%SDK_TMP%\{{ sdk.file_name }}"') do set "SDK_ACTUAL=%%h"
+if /i not "%SDK_ACTUAL%"=="{{ sdk.sha256 }}" (
+  echo checksum mismatch for {{ sdk.url }}: %SDK_ACTUAL%
+  exit 1
+)
+pushd "%SDK_TMP%"
+cmake -E tar xf "{{ sdk.file_name }}"
+if errorlevel 1 exit 1
+popd
+if exist "{{ flutter_sdk }}" rmdir /s /q "{{ flutter_sdk }}"
+move "%SDK_TMP%\flutter" "{{ flutter_sdk }}"
+if errorlevel 1 exit 1
+>"{{ flutter_sdk }}\.pixi-sdk-sha256" echo {{ sdk.sha256 }}
+rmdir /s /q "%SDK_TMP%"
+:sdk_ready
+{%- else %}
+if [ "$(cat "{{ flutter_sdk }}/.pixi-sdk-sha256" 2>/dev/null || true)" != "{{ sdk.sha256 }}" ]; then
+  sdk_tmp="{{ flutter_sdk }}.download.$$"
+  rm -rf "$sdk_tmp"
+  mkdir -p "$sdk_tmp"
+  curl -fsSL --retry 3 -o "$sdk_tmp/{{ sdk.file_name }}" "{{ sdk.url }}"
+  actual=$(cmake -E sha256sum "$sdk_tmp/{{ sdk.file_name }}" | cut -d' ' -f1)
+  if [ "$actual" != "{{ sdk.sha256 }}" ]; then
+    echo "checksum mismatch for {{ sdk.url }}: $actual" >&2
+    exit 1
+  fi
+  (cd "$sdk_tmp" && cmake -E tar xf "{{ sdk.file_name }}")
+  rm -rf "{{ flutter_sdk }}"
+  mv "$sdk_tmp/flutter" "{{ flutter_sdk }}"
+  echo "{{ sdk.sha256 }}" > "{{ flutter_sdk }}/.pixi-sdk-sha256"
+  rm -rf "$sdk_tmp"
+fi
+{%- endif %}
+{%- endif %}
+{%- if is_cmd_exe %}
+set "FLUTTER_ROOT={{ flutter_sdk }}"
+set "PATH={{ flutter_sdk }}\bin;%PATH%"
+set "FLUTTER_SUPPRESS_ANALYTICS=true"
+set "CI=true"
+{%- else %}
+export FLUTTER_ROOT="{{ flutter_sdk }}"
+export PATH="$FLUTTER_ROOT/bin:$PATH"
+export FLUTTER_SUPPRESS_ANALYTICS=true
+export CI=true
+# The SDK is a git checkout that the flutter tool inspects; trust it without
+# touching the user's git config.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
+{%- endif %}
+
+{{ flutter }} --suppress-analytics --version{{ check() }}
+{#- Projects created for other platforms have no runner for this one yet. -#}
+{%- if is_cmd_exe %}
+if not exist "{{ target }}\" {{ flutter }} --suppress-analytics create --platforms={{ target }} --project-name {{ dart_name }} .{{ check() }}
+{%- else %}
+if [ ! -d "{{ target }}" ]; then
+  {{ flutter }} --suppress-analytics create --platforms={{ target }} --project-name {{ dart_name }} .
+fi
+{%- endif %}
+{%- if target == "linux" %}
+# Let the runner's CMake project find and link GTK in the host environment.
+# libflutter_linux_gtk.so needs epoxy and fontconfig from there too.
+export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export LDFLAGS="-L$PREFIX/lib -Wl,-rpath-link,$PREFIX/lib ${LDFLAGS:-}"
+{%- endif %}
+{{ flutter }} --suppress-analytics pub get{{ check() }}
+{{ flutter }} --suppress-analytics build {{ target }} --release{% for arg in extra_args %} {{ arg }}{% endfor %}{{ check() }}
+
+{% if target == "web" -%}
+{%- if is_cmd_exe -%}
+xcopy /E /I /Y "build\web" "%LIBRARY_PREFIX%\share\{{ name }}\web"{{ check() }}
+{%- else -%}
+mkdir -p "$PREFIX/share/{{ name }}"
+cp -R build/web "$PREFIX/share/{{ name }}/web"
+{%- endif %}
+{%- elif target == "linux" -%}
+bundle=$(ls -d build/linux/*/release/bundle | head -n 1)
+mkdir -p "$PREFIX/lib/{{ name }}" "$PREFIX/bin"
+cp -R "$bundle/." "$PREFIX/lib/{{ name }}/"
+# The runner finds its data/ and lib/ next to the resolved executable, so a
+# symlink in bin/ works.
+for exe in $(find "$bundle" -maxdepth 1 -type f -perm -u+x -exec basename {} \;); do
+  ln -sf "../lib/{{ name }}/$exe" "$PREFIX/bin/$exe"
+done
+{%- elif target == "macos" -%}
+mkdir -p "$PREFIX/lib/{{ name }}" "$PREFIX/bin"
+for app in build/macos/Build/Products/Release/*.app; do
+  cp -R "$app" "$PREFIX/lib/{{ name }}/"
+  app_name=$(basename "$app" .app)
+  exe=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
+  cat > "$PREFIX/bin/{{ name }}" <<EOF
+#!/bin/sh
+exec "\$(cd "\$(dirname "\$0")/.." && pwd)/lib/{{ name }}/$app_name.app/Contents/MacOS/$exe" "\$@"
+EOF
+  chmod +x "$PREFIX/bin/{{ name }}"
+done
+{%- elif target == "windows" -%}
+set "BUNDLE="
+for /d %%d in (build\windows\*) do if exist "%%d\runner\Release" set "BUNDLE=%%d\runner\Release"
+if not defined BUNDLE exit 1
+xcopy /E /I /Y "%BUNDLE%" "%LIBRARY_PREFIX%\lib\{{ name }}"{{ check() }}
+if not exist "%LIBRARY_BIN%" mkdir "%LIBRARY_BIN%"
+for %%f in ("%BUNDLE%\*.exe") do (
+  echo @"%%~dp0..\lib\{{ name }}\%%~nxf" %%*> "%LIBRARY_BIN%\%%~nf.bat"
+)
+{%- endif %}
+{%- else %}
+dart --version{{ check() }}
+dart pub get{{ check() }}
+{% if executables | length > 0 -%}
+{%- if is_cmd_exe %}
+if not exist "%LIBRARY_BIN%" mkdir "%LIBRARY_BIN%"
+{%- else %}
+mkdir -p "$PREFIX/bin"
+{%- endif %}
+{%- for exe in executables %}
+{%- if is_cmd_exe %}
+dart compile exe "bin\{{ exe.script }}.dart" -o "%LIBRARY_BIN%\{{ exe.name }}.exe"{% for arg in extra_args %} {{ arg }}{% endfor %}{{ check() }}
+{%- else %}
+dart compile exe "bin/{{ exe.script }}.dart" -o "$PREFIX/bin/{{ exe.name }}"{% for arg in extra_args %} {{ arg }}{% endfor %}
+{%- endif %}
+{%- endfor %}
+{%- else -%}
+{#- A library without executables ships its sources for other Dart code. -#}
+{%- if is_cmd_exe %}
+xcopy /E /I /Y lib "%LIBRARY_PREFIX%\share\dart\packages\{{ dart_name }}\lib"{{ check() }}
+copy /Y pubspec.yaml "%LIBRARY_PREFIX%\share\dart\packages\{{ dart_name }}\"{{ check() }}
+{%- else %}
+mkdir -p "$PREFIX/share/dart/packages/{{ dart_name }}"
+cp -R lib pubspec.yaml "$PREFIX/share/dart/packages/{{ dart_name }}/"
+{%- endif %}
+{%- endif %}
+{%- endif %}

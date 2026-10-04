@@ -1,0 +1,19 @@
+---
+source: crates/pixi_build_flutter/src/build_script.rs
+expression: script
+---
+@echo on
+if exist "%SRC_DIR%\app" rmdir /s /q "%SRC_DIR%\app"
+robocopy "C:\src\my_app" "%SRC_DIR%\app" /E /XD "C:\src\my_app\build" "C:\src\my_app\.dart_tool" "C:\src\my_app\.pixi" /NFL /NDL /NJH /NJS
+if errorlevel 8 exit 1
+cd /d "%SRC_DIR%\app"
+if not defined PUB_CACHE set "PUB_CACHE=%SRC_DIR%\.pub-cache"
+
+dart --version
+if errorlevel 1 exit 1
+dart pub get
+if errorlevel 1 exit 1
+
+if not exist "%LIBRARY_BIN%" mkdir "%LIBRARY_BIN%"
+dart compile exe "bin\main.dart" -o "%LIBRARY_BIN%\hello.exe" --dart-define=FOO=bar
+if errorlevel 1 exit 1
