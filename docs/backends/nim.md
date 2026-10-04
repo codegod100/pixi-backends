@@ -34,6 +34,9 @@ version = "*"
 | `ignore-nimble-file` | Take metadata only from `pixi.toml` |
 | `extra-input-globs` | Extra files that should trigger rebuilds |
 
+!!! tip
+    There is also a [native Nim implementation](nim-native.md) of this backend that doesn't need Rust.
+
 ## Samples
 
 Four sample projects live in `samples/nim/`; see [Samples](../samples.md#nim).

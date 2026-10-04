@@ -13,3 +13,20 @@ jobs:
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
+
+  nim-native:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nim-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          # The backend speaks pixi-build API v7, which pixi 0.81 uses.
+          pixi-version: v0.81.0
+          manifest-path: nim-native/pixi.toml
+      - run: pixi run test
+      - run: pixi run e2e
+      - name: Build the backend with itself
+        run: PIXI_BUILD_BACKEND_OVERRIDE="pixi-build-nim=$PWD/bin/pixi-build-nim" pixi build
